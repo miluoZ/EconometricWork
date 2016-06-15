@@ -1,0 +1,238 @@
+---
+title: "随机森林方法对CHIP幸福感数据测算"
+author: "庄米罗"
+date: "2015年6月15日"
+output: html_document
+---
+
+###方法：
+**随机森林释义**
+
+>在机器学习中，随机森林由许多的决策树组成，因为这些决策树的形成采用了随机的方法，因此也叫做随机决策树。随机森林中的树之间是没有关联的。当测试数据进入随机森林时，其实就是让每一颗决策树进行分类，最后取所有决策树中分类结果最多的那类为最终的结果。因此随机森林是一个包含多个决策树的分类器，并且其输出的类别是由个别树输出的类别的众数而定。随机森林可以既可以处理属性为离散值的量，比如ID3算法，也可以处理属性为连续值的量，比如C4.5算法。另外，随机森林还可以用来进行无监督学习聚类和异常点检测。
+
+
+**随机森林的优点**
+
+- 对于很多种资料，它可以产生高准确度的分类器。
+
+- 它可以处理大量的输入变量。
+
+- 它可以在决定类别时，评估变量的重要性。
+
+- 在建造森林时，它可以在内部对于一般化后的误差产生不偏差的估计。
+
+- 它包含一个好方法可以估计遗失的资料，并且，如果有很大一部分的资料遗失，仍可以维持准确度。
+
+- 它提供一个实验方法，可以去侦测 variable interactions 。
+
+- 对于不平衡的分类资料集来说，它可以平衡误差。
+
+- 它计算各例中的亲近度，对于数据挖掘、侦测偏离者（outlier）和将资料视觉化非常有用。
+
+- 使用上述。它可被延伸应用在未标记的资料上，这类资料通常是使用非监督式聚类。也可侦测偏离者和观看资料。
+
+- 学习过程是很快速的。
+
+————————————————————————————
+
+###数据
+
+**CHIP数据**
+
+中国城市、农村和流动人口居民收入调查数据，该调查是由中国收入分配研究院发起的，囊括了三个样本：农村住户、城镇住户和流动人口住户。调查包含5000个流动人口家庭、8000个农村家庭和5000个城镇家庭样本。城镇和农村样本来自国家统计局每年的常规住户调查大样本库，子样本的选取严格按照随机原则从大样本中选取，保证对大样本中所涉及省份的覆盖。流动人口样本来调查队伍自行设计的抽样框，涉及了出现在城镇和农村调查中的9个省份15个城市，包括上海（大都市地区）；广东的广州、深圳和东莞（东部地区）；江苏的南京和无锡（东部地区）；浙江的杭州和宁波（东部地区）；湖北的武汉（中部地区）；安徽的合肥和蚌埠（中部地区）；河南的郑州和洛阳（中部地区）；重庆（西部地区）；四川的成都（西部地区）。中国大部分流动人口都集中在上述城市。关于三个样本的问卷是高度相关的，但其中也存在着差异。农村样本包括6835个家庭层面样本下20548个个人样本。流动人口样本包括2000多个家庭层面样本下5318个个人样本。
+
+```{r}
+setwd("/Users/miluoz/GitHub/miluoData/")
+load("uhs_w2_ac.rdata")
+library(ggplot2)
+discrp<-uhs_w2_ac
+discrp$a57<-as.factor(discrp$a57)
+levels(discrp$a57)[levels(discrp$a57)=="1"]<-"Very happy"
+levels(discrp$a57)[levels(discrp$a57)=="2"]<-"Fairly Happy"
+levels(discrp$a57)[levels(discrp$a57)=="3"]<-"Not very happy"
+levels(discrp$a57)[levels(discrp$a57)=="4"]<-"Not happy at all"
+discrp<-discrp[complete.cases(discrp$a57),]#目标分类
+qplot(discrp$a57,geom="bar",)
+```
+
+
+###模型设计
+
+**目标**
+
+通过个人层面的相关经济与外生变量，测算个人是否感到幸福。
+
+**变量选择**
+
+|变量名称     | 定义             |
+|:------------|-----------------:|
+|V1           |编号              |
+|V2           |幸福感            |
+|V3           |性别              |
+|V4           |婚姻状况          |
+|V5           |教育程度          |
+|V6           |健康评估          |
+|V7           |是否残疾          |
+|V8           |户口类型          |
+|V9           |三个月内是否生病  |
+|V10          |是否抽烟          |
+|V11          |是否感到精神压力  |
+|V12          |是否有医疗保险    |
+|V13          |职业类型          |
+|V14          |是否有失业保险    |
+|V15          |是否有养老保险    |
+|V16          |是否有工商保险    |
+|V17          |是否有公积金      |
+|V18          |每周工作小时数    |
+|V19          |工资收入          |
+
+###程序
+```{r}
+#预载包
+library(knitr)
+library(randomForestSRC)
+library(ggRandomForests)
+library(foreign)
+library(ggplot2)
+library(RColorBrewer)
+library(parallel)
+library(MASS)
+library(plot3D)
+#读取数据
+data<-uhs_w2_ac
+#数据预处理
+dataUrbanRaw<-data[complete.cases(data$a57),]#目标分类
+dataUrban<-dataUrbanRaw
+dataUrban<-dataUrban[complete.cases(dataUrban$a21),]#教育程度
+dataUrban<-dataUrban[complete.cases(dataUrban$a24),]#健康评估
+dataUrban<-dataUrban[complete.cases(dataUrban$a30),]#医疗保险
+dataUrban<-dataUrban[complete.cases(dataUrban$c05),]#职业
+dataUrban<-dataUrban[complete.cases(dataUrban$c09),]#失业保险
+dataUrban<-dataUrban[complete.cases(dataUrban$c10),]#养老保险
+dataUrban<-dataUrban[complete.cases(dataUrban$c11),]#工伤保险
+dataUrban<-dataUrban[complete.cases(dataUrban$c12),]#公积金
+dataUrban<-dataUrban[complete.cases(dataUrban$c16),]#工作小时
+dataUrban<-dataUrban[complete.cases(dataUrban$c19),]#工资
+dataUrban<-dataUrban[complete.cases(dataUrban$a16),]#婚姻状况
+dataUrban<-dataUrban[complete.cases(dataUrban$a26),]#户籍情况
+dataUrban<-dataUrban[complete.cases(dataUrban$a32),]#3个月内是否生病
+dataUrban$c16<-as.numeric(dataUrban$c16)#工作小时数据类型变成数值型
+dataUrban$a40<-ifelse(dataUrban$a40==0,0,1)
+dataUrban$a40<-as.factor(dataUrban$a40)
+dataUrban$a57<-as.factor(dataUrban$a57)
+dataUrban<-dataUrban[complete.cases(dataUrban$a40),]#是否抽烟
+levels(dataUrban$a57)[levels(dataUrban$a57)=="1"]<-"1"
+levels(dataUrban$a57)[levels(dataUrban$a57)=="2"]<-"1"
+levels(dataUrban$a57)[levels(dataUrban$a57)=="3"]<-"0"
+levels(dataUrban$a57)[levels(dataUrban$a57)=="4"]<-"0"
+
+
+
+#id、幸福感、性别、婚姻状况、教育程度、健康评估、是否残疾、户口类型、三个月内是否生病、
+#是否抽烟、是否感到精神压力、是否有医疗保险及类型、职业、是否有失业保险、是否有养老保险、
+#是否有工伤保险、是否有公积金、每周工作小时数、工资
+alldata<-cbind(dataUrban$idcode,dataUrban$a57,dataUrban$a05,dataUrban$a16,dataUrban$a21,
+               dataUrban$a24,dataUrban$a25,dataUrban$a26,dataUrban$a32,dataUrban$a40,
+               dataUrban$a50,dataUrban$a30,dataUrban$c05,dataUrban$c09,dataUrban$c10,
+               dataUrban$c11,dataUrban$c12,dataUrban$c16,dataUrban$c19)
+alldata<-as.data.frame(alldata)
+alldata$V19<-as.numeric(levels(alldata$V19))[alldata$V19]
+alldata$V18<-as.numeric(levels(alldata$V18))[alldata$V18]
+
+#获取训练集和测试集
+train<-alldata[1:3000,]
+test<-alldata[3001:3808,]
+#设置随机种子
+set.seed(100)
+#训练模型
+myForest<-rfsrc(V2~V3+V4+V5+V7+V8+V9+V10+V11+V12+V13+V14+V15+V16+V17+V18+V19,
+                       data=train,ntree=500,)
+#模型参数
+myForest
+#预测
+myPrediction<-predict(myForest,test)
+myPrediction
+
+#重要因素以及可视化
+myForestError<-gg_error(myForest)
+plot(myForestError)
+plot(gg_rfsrc(myForest), alpha=.5)
+plot(gg_vimp(myForest))
+gg_v <- gg_variable(myForest)
+
+plot(gg_v,  panel=TRUE)
+       
+
+```
+
+###模型存在的问题
+```{r}
+#预载包
+library(knitr)
+library(randomForestSRC)
+library(ggRandomForests)
+library(foreign)
+library(ggplot2)
+library(RColorBrewer)
+library(parallel)
+library(MASS)
+library(plot3D)
+#读取数据
+data<-uhs_w2_ac
+#数据预处理
+dataUrbanRaw<-data[complete.cases(data$a57),]#目标分类
+dataUrban<-dataUrbanRaw
+dataUrban<-dataUrban[complete.cases(dataUrban$a21),]#教育程度
+dataUrban<-dataUrban[complete.cases(dataUrban$a24),]#健康评估
+dataUrban<-dataUrban[complete.cases(dataUrban$a30),]#医疗保险
+dataUrban<-dataUrban[complete.cases(dataUrban$c05),]#职业
+dataUrban<-dataUrban[complete.cases(dataUrban$c09),]#失业保险
+dataUrban<-dataUrban[complete.cases(dataUrban$c10),]#养老保险
+dataUrban<-dataUrban[complete.cases(dataUrban$c11),]#工伤保险
+dataUrban<-dataUrban[complete.cases(dataUrban$c12),]#公积金
+dataUrban<-dataUrban[complete.cases(dataUrban$c16),]#工作小时
+dataUrban<-dataUrban[complete.cases(dataUrban$c19),]#工资
+dataUrban<-dataUrban[complete.cases(dataUrban$a16),]#婚姻状况
+dataUrban<-dataUrban[complete.cases(dataUrban$a26),]#户籍情况
+dataUrban<-dataUrban[complete.cases(dataUrban$a32),]#3个月内是否生病
+dataUrban$c16<-as.numeric(dataUrban$c16)#工作小时数据类型变成数值型
+dataUrban$a40<-ifelse(dataUrban$a40==0,0,1)
+dataUrban$a40<-as.factor(dataUrban$a40)
+dataUrban<-dataUrban[complete.cases(dataUrban$a40),]#是否抽烟
+
+
+
+
+#id、幸福感、性别、婚姻状况、教育程度、健康评估、是否残疾、户口类型、三个月内是否生病、
+#是否抽烟、是否感到精神压力、是否有医疗保险及类型、职业、是否有失业保险、是否有养老保险、
+#是否有工伤保险、是否有公积金、每周工作小时数、工资
+alldata<-cbind(dataUrban$idcode,dataUrban$a57,dataUrban$a05,dataUrban$a16,dataUrban$a21,
+               dataUrban$a24,dataUrban$a25,dataUrban$a26,dataUrban$a32,dataUrban$a40,
+               dataUrban$a50,dataUrban$a30,dataUrban$c05,dataUrban$c09,dataUrban$c10,
+               dataUrban$c11,dataUrban$c12,dataUrban$c16,dataUrban$c19)
+alldata<-as.data.frame(alldata)
+alldata$V19<-as.numeric(levels(alldata$V19))[alldata$V19]
+alldata$V18<-as.numeric(levels(alldata$V18))[alldata$V18]
+
+#获取训练集和测试集
+train<-alldata[1:3000,]
+test<-alldata[3001:3808,]
+#设置随机种子
+set.seed(100)
+#训练模型
+myForest<-rfsrc(V2~V3+V4+V5+V7+V8+V9+V10+V11+V12+V13+V14+V15+V16+V17+V18+V19,
+                       data=train,ntree=500,)
+#模型参数
+myForest
+#预测
+myPrediction<-predict(myForest,test)
+myPrediction
+
+#重要因素以及可视化
+myForestError<-gg_error(myForest)
+plot(myForestError)
+plot(gg_rfsrc(myForest), alpha=.5)
+plot(gg_vimp(myForest))
+gg_v <- gg_variable(myForest)
+plot(gg_v,  panel=TRUE)
+```
